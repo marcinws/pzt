@@ -1,89 +1,109 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-  <meta charset="UTF-8" />
-  <title>Sprawdź zawodników z CSV na GitHub Pages</title>
-  <style>
-    table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background-color: #f2f2f2; }
-  </style>
+<meta charset="UTF-8" />
+<title>Scraper w JS (tylko demo)</title>
+<style>
+  table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background-color: #f2f2f2; }
+</style>
 </head>
 <body>
-  <h2>Sprawdź zawodników z CSV (GitHub Pages)</h2>
-
-  <label>Fraza: <input type="text" id="fraza" /></label><br/>
-  <label>Data: <input type="text" id="data" placeholder="np. 2025-08-14" /></label><br/>
+  <h2>Scraper zawodników</h2>
+  Fraza: <input id="fraza" type="text" value="turniej" />
+  Data: <input id="data" type="text" value="2025-08" />
   <button onclick="sprawdz()">Sprawdź</button>
+  <div id="wynik">Kliknij "Sprawdź"</div>
 
-  <h3>Wynik:</h3>
-  <div id="wynik">Proszę kliknąć "Sprawdź"</div>
+<script>
+async function fetchCSV() {
+  const res = await fetch('wyniki.csv');
+  if(!res.ok) throw new Error('Nie udało się pobrać CSV');
+  return (await res.text()).split('\n').slice(1).map(line => line.split(','));
+}
 
-  <script>
-    // Funkcja do parsowania CSV do obiektów
-    function parseCSV(text) {
-      const lines = text.trim().split('\n');
-      const result = [];
-      for(let i=1; i<lines.length; i++) {
-        const row = lines[i].split(',');
-        if(row.length >= 5) {
-          result.push({
-            login: row[0].trim(),
-            nazwisko: row[1].trim(),
-            imie: row[2].trim(),
-            wiek: row[3].trim(),
-            klub: row[4].trim(),
-            woj: row.length > 5 ? row[5].trim() : "---"
-          });
-        }
-      }
-      return result;
+async function fetchTurnieje(login) {
+  const url = `https://portal.pzt.pl/PlayerTournament.aspx?UserID=${login}`;
+  // To prawdopodobnie NIE zadziała z powodu CORS
+  const res = await fetch(url, {headers: {'User-Agent': 'Mozilla/5.0'}});
+  if(!res.ok) throw new Error('Błąd pobierania turniejów dla ' + login);
+  const text = await res.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/html');
+  const tabela = doc.querySelector('table.listBlue');
+  if(!tabela) return [];
+  const rows = tabela.querySelectorAll('tr');
+  let wynik = [];
+  for(let i=2; i<rows.length; i++) {
+    const cols = rows[i].querySelectorAll('td');
+    if(cols.length >= 5) {
+      wynik.push({
+        nazwa: cols[1].textContent,
+        data: cols[4].textContent
+      });
     }
+  }
+  return wynik;
+}
 
-    async function sprawdz() {
-      const fraza = document.getElementById('fraza').value.toLowerCase();
-      const data = document.getElementById('data').value;
+async function sprawdz() {
+  const fraza = document.getElementById('fraza').value.toLowerCase();
+  const data = document.getElementById('data').value;
+  const wynikDiv = document.getElementById('wynik');
+  wynikDiv.innerHTML = 'Ładowanie...';
+
+  try {
+    const csv = await fetchCSV();
+
+    let znalezieni = [];
+
+    for(let i=0; i<csv.length; i++) {
+      const row = csv[i];
+      if(row.length < 5) continue;
+      const login = row[0].trim();
+      const nazwisko = row[1].trim();
+      const imie = row[2].trim();
+      const wiek = row[3].trim();
+      const klub = row[4].trim();
+      const woj = row.length > 5 ? row[5].trim() : "---";
 
       try {
-        const response = await fetch('wyniki.csv');
-        if (!response.ok) throw new Error('Nie udało się pobrać pliku CSV');
-        const csvText = await response.text();
-        const zawodnicy = parseCSV(csvText);
-
-        // Tu filtrujemy wg nazwiska lub imienia (bo nie mamy danych turniejowych)
-        const wynikFiltrowany = zawodnicy.filter(z =>
-          z.nazwisko.toLowerCase().includes(fraza) ||
-          z.imie.toLowerCase().includes(fraza)
-        );
-
-        if(wynikFiltrowany.length === 0) {
-          document.getElementById('wynik').innerHTML = '<p>Brak zawodników spełniających kryteria.</p>';
-          return;
+        const turnieje = await fetchTurnieje(login);
+        const znalezionyTurniej = turnieje.find(t =>
+          t.nazwa.toLowerCase().includes(fraza) && t.data.includes(data));
+        if(znalezionyTurniej) {
+          znalezieni.push({login, nazwisko, imie, wiek, woj, klub, turniej: znalezionyTurniej.nazwa, dataTurnieju: znalezionyTurniej.data});
         }
-
-        let html = `<table>
-          <tr>
-            <th>Login</th><th>Nazwisko</th><th>Imię</th><th>Wiek</th><th>Klub</th><th>Woj.</th>
-          </tr>`;
-
-        wynikFiltrowany.forEach(z => {
-          html += `<tr>
-            <td>${z.login}</td>
-            <td>${z.nazwisko}</td>
-            <td>${z.imie}</td>
-            <td>${z.wiek}</td>
-            <td>${z.klub}</td>
-            <td>${z.woj}</td>
-          </tr>`;
-        });
-
-        html += '</table>';
-        document.getElementById('wynik').innerHTML = html;
-
-      } catch (error) {
-        document.getElementById('wynik').innerHTML = `<p>Błąd: ${error.message}</p>`;
+      } catch(e) {
+        console.error(e);
       }
     }
-  </script>
+
+    if(znalezieni.length === 0) {
+      wynikDiv.innerHTML = '<p>Brak zawodników spełniających kryteria.</p>';
+      return;
+    }
+
+    let html = `<table><tr>
+      <th>Login</th><th>Nazwisko</th><th>Imię</th><th>Wiek</th><th>Woj.</th><th>Klub</th><th>Turniej</th><th>Data</th><th>Profil</th>
+    </tr>`;
+
+    for(const z of znalezieni) {
+      html += `<tr>
+        <td>${z.login}</td><td>${z.nazwisko}</td><td>${z.imie}</td><td>${z.wiek}</td>
+        <td>${z.woj}</td><td>${z.klub}</td><td>${z.turniej}</td><td>${z.dataTurnieju}</td>
+        <td><a href="https://portal.pzt.pl/PlayerProfile.aspx?UserID=${z.login}" target="_blank">Profil</a></td>
+      </tr>`;
+    }
+
+    html += '</table>';
+    wynikDiv.innerHTML = html;
+
+  } catch(e) {
+    wynikDiv.innerHTML = '<p>Błąd: '+e.message+'</p>';
+  }
+}
+</script>
 </body>
 </html>
