@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sprawdź zawodników z CSV na GitHub Pages</title>
+  <style>
+    table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h2>Sprawdź zawodników z CSV (GitHub Pages)</h2>
+
+  <label>Fraza: <input type="text" id="fraza" /></label><br/>
+  <label>Data: <input type="text" id="data" placeholder="np. 2025-08-14" /></label><br/>
+  <button onclick="sprawdz()">Sprawdź</button>
+
+  <h3>Wynik:</h3>
+  <div id="wynik">Proszę kliknąć "Sprawdź"</div>
+
+  <script>
+    // Funkcja do parsowania CSV do obiektów
+    function parseCSV(text) {
+      const lines = text.trim().split('\n');
+      const result = [];
+      for(let i=1; i<lines.length; i++) {
+        const row = lines[i].split(',');
+        if(row.length >= 5) {
+          result.push({
+            login: row[0].trim(),
+            nazwisko: row[1].trim(),
+            imie: row[2].trim(),
+            wiek: row[3].trim(),
+            klub: row[4].trim(),
+            woj: row.length > 5 ? row[5].trim() : "---"
+          });
+        }
+      }
+      return result;
+    }
+
+    async function sprawdz() {
+      const fraza = document.getElementById('fraza').value.toLowerCase();
+      const data = document.getElementById('data').value;
+
+      try {
+        const response = await fetch('wyniki.csv');
+        if (!response.ok) throw new Error('Nie udało się pobrać pliku CSV');
+        const csvText = await response.text();
+        const zawodnicy = parseCSV(csvText);
+
+        // Tu filtrujemy wg nazwiska lub imienia (bo nie mamy danych turniejowych)
+        const wynikFiltrowany = zawodnicy.filter(z =>
+          z.nazwisko.toLowerCase().includes(fraza) ||
+          z.imie.toLowerCase().includes(fraza)
+        );
+
+        if(wynikFiltrowany.length === 0) {
+          document.getElementById('wynik').innerHTML = '<p>Brak zawodników spełniających kryteria.</p>';
+          return;
+        }
+
+        let html = `<table>
+          <tr>
+            <th>Login</th><th>Nazwisko</th><th>Imię</th><th>Wiek</th><th>Klub</th><th>Woj.</th>
+          </tr>`;
+
+        wynikFiltrowany.forEach(z => {
+          html += `<tr>
+            <td>${z.login}</td>
+            <td>${z.nazwisko}</td>
+            <td>${z.imie}</td>
+            <td>${z.wiek}</td>
+            <td>${z.klub}</td>
+            <td>${z.woj}</td>
+          </tr>`;
+        });
+
+        html += '</table>';
+        document.getElementById('wynik').innerHTML = html;
+
+      } catch (error) {
+        document.getElementById('wynik').innerHTML = `<p>Błąd: ${error.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>
